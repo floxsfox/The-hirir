@@ -1,0 +1,63 @@
+name: Build The Enien (Android APK)
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cari project (otomatis unzip jika di-upload sebagai ZIP)
+        run: |
+          if [ ! -f project.godot ]; then
+            for z in *.zip; do [ -f "$z" ] && unzip -oq "$z" -d _unz; done
+          fi
+          F=$(find . -name project.godot | head -1)
+          [ -n "$F" ] || { echo "project.godot tidak ditemukan"; exit 1; }
+          echo "P=$(dirname "$F")" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34" "cmdline-tools;latest"
+
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.3.0
+          use-dotnet: false
+          include-templates: true
+
+      - name: Keystore debug + pengaturan editor Godot
+        run: |
+          keytool -genkeypair -keystore "$HOME/debug.keystore" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          mkdir -p "$HOME/.config/godot"
+          for f in editor_settings-4.tres editor_settings-4.3.tres; do
+            printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nexport/android/android_sdk_path = "%s"\nexport/android/java_sdk_path = "%s"\nexport/android/debug_keystore = "%s/debug.keystore"\nexport/android/debug_keystore_user = "androiddebugkey"\nexport/android/debug_keystore_pass = "android"\n' "$ANDROID_HOME" "$JAVA_HOME" "$HOME" > "$HOME/.config/godot/$f"
+          done
+
+      - name: Unduh aset (model, tekstur, suara) dari internet
+        run: cd "$P" && python3 fetch_assets.py
+
+      - name: Import & export APK
+        run: |
+          cd "$P"
+          mkdir -p build
+          godot --headless --import || true
+          godot --headless --export-debug "Android" build/the-enien.apk
+          ls -la build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: the-enien-apk
+          path: ${{ env.P }}/build/*.apk
+          
